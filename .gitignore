@@ -1,0 +1,41 @@
+# ---- .NET / Visual Studio build çıktıları ----
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+bld/
+
+# ---- Visual Studio / IDE ----
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+.idea/
+
+# ---- Rider / ReSharper ----
+_ReSharper*/
+*.DotSettings.user
+
+# ---- NuGet ----
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# ---- Test / kapsama ----
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+
+# ---- Genel ----
+*.log
+*.tmp
+Thumbs.db
+.DS_Store

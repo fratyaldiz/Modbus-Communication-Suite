@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Test\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Modbus.Core\Modbus.Core.csproj" />
+    <!-- Server tarafı yanıt üretirken CRC16 / PacketBuilder gibi
+         Protocol katmanındaki araçları kullanacak, o yüzden referans ekledik. -->
+    <ProjectReference Include="..\Modbus.Protocol\Modbus.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>
+

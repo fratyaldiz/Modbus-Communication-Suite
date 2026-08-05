@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Modbus.App/Modbus.App.csproj" />
+  <Project Path="Modbus.Communication/Modbus.Communication.csproj" />
+  <Project Path="Modbus.Core/Modbus.Core.csproj" />
+  <Project Path="Modbus.Devices/Modbus.Devices.csproj" />
+  <Project Path="Modbus.Protocol/Modbus.Protocol.csproj" />
+</Solution>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+
+    <!-- Farklı monitör ve Windows ölçeklendirmelerinde doğru DPI davranışı -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Modbus.Communication\Modbus.Communication.csproj" />
+    <ProjectReference Include="..\Modbus.Core\Modbus.Core.csproj" />
+    <ProjectReference Include="..\Modbus.Devices\Modbus.Devices.csproj" />
+    <ProjectReference Include="..\Modbus.Protocol\Modbus.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Helpers\" />
+    <Folder Include="Services\" />
+    <Folder Include="Views\" />
+  </ItemGroup>
+
+</Project>
