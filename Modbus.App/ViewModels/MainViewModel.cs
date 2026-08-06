@@ -34,6 +34,10 @@ namespace Modbus.App.ViewModels
         private ModbusRtuServer? _rtuServer;   // RTU (seri) slave — kart Master olursa
         private ushort _transactionId;
 
+        // Sürekli okuma (polling) ve aynı anda tek istek güvencesi
+        private System.Windows.Threading.DispatcherTimer? _pollTimer;
+        private bool _requestInFlight;   // bir istek işlenirken yenisini başlatma (overlap engeli)
+
         public MainViewModel()
         {
             ConnectClientCommand = new RelayCommand(OnConnectClient);
@@ -42,6 +46,7 @@ namespace Modbus.App.ViewModels
             StartServerCommand = new RelayCommand(OnStartServer);
             StopServerCommand = new RelayCommand(OnStopServer);
             SendCommand = new RelayCommand(OnSend);
+            TogglePollCommand = new RelayCommand(OnTogglePoll);
             ClearLogCommand = new RelayCommand(() => LogEntries.Clear());
             ResetColorsCommand = new RelayCommand(OnResetColors);
 
@@ -544,7 +549,44 @@ namespace Modbus.App.ViewModels
 
         public ICommand SendCommand { get; }
 
+        public ICommand TogglePollCommand { get; }
+
         public ICommand ClearLogCommand { get; }
+
+        // -------- Sürekli okuma (Polling) --------
+        private bool _isPolling;
+
+        /// <summary>Sürekli okuma açık mı? Arayüzdeki POLL düğmesinin durumunu belirler.</summary>
+        public bool IsPolling
+        {
+            get => _isPolling;
+            set { _isPolling = value; OnPropertyChanged(); OnPropertyChanged(nameof(PollButtonText)); }
+        }
+
+        /// <summary>POLL düğmesinin üzerindeki yazı.</summary>
+        public string PollButtonText => _isPolling ? "STOP POLL" : "POLL";
+
+        private string _scanRate = "1000";
+
+        /// <summary>İki okuma arasındaki süre (ms). Modbus Poll'daki "Scan Rate" karşılığı.</summary>
+        public string ScanRate
+        {
+            get => _scanRate;
+            set { _scanRate = value; OnPropertyChanged(); }
+        }
+
+        // -------- İstatistik sayaçları (Modbus Poll durum çubuğu gibi) --------
+        private int _txCount;
+        public int TxCount { get => _txCount; set { _txCount = value; OnPropertyChanged(); } }
+
+        private int _rxCount;
+        public int RxCount { get => _rxCount; set { _rxCount = value; OnPropertyChanged(); } }
+
+        private int _errCount;
+        public int ErrCount { get => _errCount; set { _errCount = value; OnPropertyChanged(); } }
+
+        private int _timeoutCount;
+        public int TimeoutCount { get => _timeoutCount; set { _timeoutCount = value; OnPropertyChanged(); } }
 
         public ICommand ResetColorsCommand { get; }
 
@@ -780,6 +822,7 @@ namespace Modbus.App.ViewModels
                 await _client.ConnectAsync();
 
                 ClientStatus = "Bağlandı";
+                ResetCounters(); // Yeni bağlantıda istatistikleri sıfırla.
 
                 if (ClientProtocolIndex == 0)
                 {
@@ -818,6 +861,8 @@ namespace Modbus.App.ViewModels
         {
             try
             {
+                StopPolling(); // Bağlantı kapatılırken sürekli okumayı da durdur.
+
                 if (_client != null)
                 {
                     await _client.DisconnectAsync();
@@ -980,6 +1025,23 @@ namespace Modbus.App.ViewModels
 
         private async void OnSend()
         {
+            // Bir istek işleniyorsa (özellikle polling sırasında) yenisini başlatma.
+            if (_requestInFlight)
+                return;
+
+            _requestInFlight = true;
+            try
+            {
+                await SendRequestCoreAsync();
+            }
+            finally
+            {
+                _requestInFlight = false;
+            }
+        }
+
+        private async Task SendRequestCoreAsync()
+        {
             if (_client == null || !_client.IsConnected)
             {
                 AddLog("Önce Client bölümünden bağlantı kurun.");
@@ -1114,6 +1176,7 @@ namespace Modbus.App.ViewModels
                     writeValue,
                     multipleValues);
 
+                TxCount++;
                 AddLog("[Client TX] " + ToHex(request));
 
                 if (!isTcp)
@@ -1125,6 +1188,7 @@ namespace Modbus.App.ViewModels
                 byte[] response =
                     await _client.SendAsync(request);
 
+                RxCount++;
                 AddLog("[Client RX] " + ToHex(response));
 
                 if (!isTcp)
@@ -1282,6 +1346,7 @@ namespace Modbus.App.ViewModels
             }
             catch (TimeoutException ex)
             {
+                TimeoutCount++;
                 LastResponseSummary =
                     "Zaman aşımı: " + ex.Message;
 
@@ -1290,12 +1355,101 @@ namespace Modbus.App.ViewModels
             }
             catch (Exception ex)
             {
+                ErrCount++;
                 LastResponseSummary =
                     "Hata: " + ex.Message;
 
                 AddLog(
                     "HATA (Send): " + ex.Message);
             }
+        }
+
+        // ================================================================
+        // SÜREKLİ OKUMA (POLLING)
+        // ================================================================
+
+        private void OnTogglePoll()
+        {
+            if (_isPolling)
+                StopPolling();
+            else
+                StartPolling();
+        }
+
+        private void StartPolling()
+        {
+            if (_isPolling)
+                return;
+
+            if (_client == null || !_client.IsConnected)
+            {
+                AddLog("Sürekli okuma için önce Client bağlantısı kurun.");
+                return;
+            }
+
+            int scan;
+            try
+            {
+                scan = ParseIntInRange(ScanRate, 50, 600000, "Scan rate");
+            }
+            catch (Exception ex)
+            {
+                AddLog("HATA (Scan rate): " + ex.Message);
+                return;
+            }
+
+            _pollTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(scan)
+            };
+            _pollTimer.Tick += OnPollTick;
+            _pollTimer.Start();
+
+            IsPolling = true;
+            AddLog($"Sürekli okuma başladı. Tarama aralığı: {scan} ms.");
+
+            // İlk okumayı aralığı beklemeden hemen yap.
+            OnSend();
+        }
+
+        private void StopPolling()
+        {
+            if (_pollTimer != null)
+            {
+                _pollTimer.Stop();
+                _pollTimer.Tick -= OnPollTick;
+                _pollTimer = null;
+            }
+
+            if (_isPolling)
+            {
+                IsPolling = false;
+                AddLog("Sürekli okuma durduruldu.");
+            }
+        }
+
+        private void OnPollTick(object? sender, EventArgs e)
+        {
+            // Bağlantı düştüyse otomatik dur.
+            if (_client == null || !_client.IsConnected)
+            {
+                StopPolling();
+                return;
+            }
+
+            // Önceki istek hâlâ sürüyorsa bu turu atla.
+            if (_requestInFlight)
+                return;
+
+            OnSend();
+        }
+
+        private void ResetCounters()
+        {
+            TxCount = 0;
+            RxCount = 0;
+            ErrCount = 0;
+            TimeoutCount = 0;
         }
 
         // ================================================================
