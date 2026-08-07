@@ -26,6 +26,7 @@ namespace Modbus.App.Models
         private string _dataType;
         private string _byteOrder;
         private string _comment;
+        private string? _displayValueOverride;
         private DateTime _lastUpdated;
         private int _changeDirection;
 
@@ -92,8 +93,16 @@ namespace Modbus.App.Models
         /// </summary>
         public int Address { get; }
 
-        /// <summary>Adresin hex gösterimi. Emülatörler adresi böyle gösterir.</summary>
-        public string AddressHex => $"0x{Address:X4}";
+        /// <summary>
+        /// Adresin tabloda gösterilecek biçimi.
+        /// Generic Modbus adresleri hex gösterilir. LiBat profilinde kullanıcı
+        /// dokümandaki 4xxxx adresini görmek istediği için 40088..40154 doğrudan
+        /// onluk olarak gösterilir.
+        /// </summary>
+        public string AddressHex =>
+            Address >= 40000
+                ? Address.ToString()
+                : $"0x{Address:X4}";
 
         /// <summary>
         /// Registerın türü. Holding (4x, oku/yaz) veya Input (3x, salt okunur).
@@ -222,6 +231,26 @@ namespace Modbus.App.Models
         public short SignedValue => DataConverter.ToInt16(_value);
 
         /// <summary>
+        /// Cihaz profili ham register değerine özel ölçek/birim uygulamak istiyorsa
+        /// buraya hazır gösterim metni yazabilir. Örneğin LiBat 40111 için
+        /// ham 271 değeri "27.1 °C" olarak gösterilir. null/boş ise normal
+        /// DataType hesaplaması kullanılır.
+        /// </summary>
+        public string? DisplayValueOverride
+        {
+            get => _displayValueOverride;
+            set
+            {
+                if (_displayValueOverride == value)
+                    return;
+
+                _displayValueOverride = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(DisplayValue));
+            }
+        }
+
+        /// <summary>
         /// Seçilen veri türüne göre yorumlanmış değer.
         ///
         /// UInt16 / Int16           -> tek register
@@ -232,6 +261,9 @@ namespace Modbus.App.Models
         {
             get
             {
+                if (!string.IsNullOrWhiteSpace(_displayValueOverride))
+                    return _displayValueOverride;
+
                 RegisterByteOrder order = DataConverter.ParseByteOrder(_byteOrder);
 
                 switch (_dataType)

@@ -27,7 +27,7 @@ namespace Modbus.App.ViewModels
     {
         private readonly PacketBuilder _builder = new();
         private readonly ResponseParser _parser = new();
-        private readonly ModbusDataStore _dataStore = new();
+        private readonly ModbusDataStore _dataStore = new(registerCount: 256, bitCount: 100);
 
         private IModbusClient? _client;
         private ModbusTcpServer? _server;
@@ -1056,12 +1056,6 @@ namespace Modbus.App.ViewModels
                     247,
                     "Unit ID");
 
-                ushort address = (ushort)ParseIntInRange(
-                    Address,
-                    0,
-                    65535,
-                    "Adres");
-
                 ModbusFunctionCode function = FunctionIndex switch
                 {
                     0 => ModbusFunctionCode.ReadCoils,
@@ -1073,6 +1067,37 @@ namespace Modbus.App.ViewModels
                     6 => ModbusFunctionCode.WriteMultipleRegisters,
                     _ => ModbusFunctionCode.ReadHoldingRegisters
                 };
+
+                int enteredAddress = ParseIntInRange(
+                    Address,
+                    0,
+                    65535,
+                    "Adres");
+
+                bool useLiBatProfile = false;
+                ushort address;
+
+                bool holdingOperation =
+                    function == ModbusFunctionCode.ReadHoldingRegisters ||
+                    function == ModbusFunctionCode.WriteSingleRegister ||
+                    function == ModbusFunctionCode.WriteMultipleRegisters;
+
+                if (holdingOperation &&
+                    LiBatBmsProfile.TryLogicalToProtocolAddress(
+                        enteredAddress,
+                        out ushort liBatProtocolAddress))
+                {
+                    useLiBatProfile = true;
+                    address = liBatProtocolAddress;
+
+                    AddLog(
+                        $"[LiBat] PLC adresi {enteredAddress} -> " +
+                        $"Register/PDU adresi {address} (0x{address:X4}) olarak çevrildi.");
+                }
+                else
+                {
+                    address = (ushort)enteredAddress;
+                }
 
                 bool isRegisterRead =
                     function == ModbusFunctionCode.ReadHoldingRegisters ||
@@ -1112,6 +1137,28 @@ namespace Modbus.App.ViewModels
                 {
                     multipleValues = ParseRegisterValueList(WriteValues);
                     quantity = (ushort)multipleValues.Length;
+                }
+
+                if (useLiBatProfile &&
+                    function == ModbusFunctionCode.WriteSingleRegister &&
+                    enteredAddress == 40154 &&
+                    writeValue is < 1 or > 247)
+                {
+                    throw new InvalidOperationException(
+                        "LiBat 40154 (Modbus Address) yalnızca 1..247 arasında yazılabilir.");
+                }
+
+                if (useLiBatProfile &&
+                    (isRegisterRead ||
+                     function == ModbusFunctionCode.WriteMultipleRegisters))
+                {
+                    int lastLogicalAddress = enteredAddress + quantity - 1;
+                    if (lastLogicalAddress > LiBatBmsProfile.LastLogicalAddress)
+                    {
+                        throw new InvalidOperationException(
+                            $"LiBat isteği register map sınırını aşıyor. " +
+                            $"Son geçerli adres {LiBatBmsProfile.LastLogicalAddress}.");
+                    }
                 }
 
                 byte[] pdu = function switch
@@ -1176,6 +1223,19 @@ namespace Modbus.App.ViewModels
                     writeValue,
                     multipleValues);
 
+                if (useLiBatProfile)
+                {
+                    AddPacketField(
+                        RequestDetails,
+                        "LiBat PLC Address",
+                        enteredAddress.ToString(),
+                        $"Dokümandaki 4xxxx adresi; Modbus Register/PDU adresi {address} (0x{address:X4})");
+
+                    LastRequestSummary =
+                        $"LiBat {enteredAddress} -> Register {address} | " +
+                        LastRequestSummary;
+                }
+
                 TxCount++;
                 AddLog("[Client TX] " + ToHex(request));
 
@@ -1234,18 +1294,63 @@ namespace Modbus.App.ViewModels
                             ? "Input Register"
                             : "Holding Register";
 
+                    int displayStartAddress =
+                        useLiBatProfile
+                            ? enteredAddress
+                            : address;
+
                     UpdateClientRegisterRows(
                         address,
+                        displayStartAddress,
                         values,
-                        registerType);
+                        registerType,
+                        useLiBatProfile);
 
-                    LastResponseSummary =
-                        $"{values.Length} register okundu: " +
-                        $"{string.Join(", ", values)}";
+                    if (useLiBatProfile)
+                    {
+                        LastResponseSummary =
+                            BuildLiBatReadSummary(
+                                enteredAddress,
+                                values);
 
-                    AddLog(
-                        "Okunan register değerleri: " +
-                        string.Join(", ", values));
+                        AddLiBatResponseDetails(
+                            enteredAddress,
+                            values);
+
+                        if (LiBatBmsProfile.TryDecodeStatusFromRead(
+                                enteredAddress,
+                                values,
+                                out ulong batteryStatus,
+                                out var activeStatusBits))
+                        {
+                            string statusText =
+                                activeStatusBits.Count == 0
+                                    ? "Aktif Battery Status biti yok."
+                                    : string.Join(" | ", activeStatusBits);
+
+                            AddPacketField(
+                                ResponseDetails,
+                                "Battery Status 64-bit",
+                                $"0x{batteryStatus:X16}",
+                                statusText);
+
+                            AddLog(
+                                "[LiBat Battery Status] " +
+                                statusText);
+
+                            LastResponseSummary +=
+                                " | Battery Status: " +
+                                statusText;
+                        }
+                    }
+                    else
+                    {
+                        LastResponseSummary =
+                            $"{values.Length} register okundu: " +
+                            $"{string.Join(", ", values)}";
+                    }
+
+                    AddLog(LastResponseSummary);
 
                     if (ClientRegisters.Count > 0)
                     {
@@ -1285,13 +1390,36 @@ namespace Modbus.App.ViewModels
                             "FC06 onay cevabı gönderilen adres/değer ile uyuşmuyor.");
                     }
 
+                    int displayAddress =
+                        useLiBatProfile
+                            ? enteredAddress
+                            : address;
+
                     LastResponseSummary =
-                        $"Register {address} için yazma onaylandı. " +
-                        $"Değer: {writeValue}";
+                        useLiBatProfile
+                            ? $"LiBat {displayAddress} (Register {address}) için yazma onaylandı. Değer: {writeValue}"
+                            : $"Register {address} için yazma onaylandı. Değer: {writeValue}";
 
                     UpdateSingleClientRegister(
                         address,
-                        writeValue);
+                        displayAddress,
+                        writeValue,
+                        useLiBatProfile);
+
+                    // LiBat 40154 yazılırsa gerçek BMS davranışına göre sonraki
+                    // isteklerde yeni Unit ID kullanılmalıdır. Client alanını da
+                    // kullanıcı yanlışlıkla eski ID ile devam etmesin diye güncelle.
+                    if (useLiBatProfile &&
+                        enteredAddress == 40154 &&
+                        writeValue is >= 1 and <= 247)
+                    {
+                        SlaveId = writeValue.ToString();
+                        ServerUnitId = writeValue.ToString();
+
+                        AddLog(
+                            $"[LiBat] 40154 yazıldı. Yeni Modbus Unit ID: {writeValue}. " +
+                            "Sonraki istekler bu Unit ID ile gönderilmelidir.");
+                    }
 
                     AddLog(LastResponseSummary);
                 }
@@ -1332,14 +1460,23 @@ namespace Modbus.App.ViewModels
                             "FC16 onay cevabı gönderilen başlangıç adresi/adet ile uyuşmuyor.");
                     }
 
+                    int displayStartAddress =
+                        useLiBatProfile
+                            ? enteredAddress
+                            : address;
+
                     UpdateMultipleClientRegisters(
                         address,
-                        multipleValues);
+                        displayStartAddress,
+                        multipleValues,
+                        useLiBatProfile);
 
                     LastResponseSummary =
-                        $"FC16 yazma onaylandı. Başlangıç adresi: {address}, " +
-                        $"adet: {multipleValues.Length}, değerler: " +
-                        string.Join(", ", multipleValues);
+                        useLiBatProfile
+                            ? $"LiBat FC16 yazma onaylandı. Başlangıç: {displayStartAddress} (Register {address}), " +
+                              $"adet: {multipleValues.Length}, değerler: {string.Join(", ", multipleValues)}"
+                            : $"FC16 yazma onaylandı. Başlangıç adresi: {address}, " +
+                              $"adet: {multipleValues.Length}, değerler: {string.Join(", ", multipleValues)}";
 
                     AddLog(LastResponseSummary);
                 }
@@ -1462,6 +1599,7 @@ namespace Modbus.App.ViewModels
                 20,
                 _dataStore.HoldingRegisters.Length);
 
+            // Önce mevcut generic test registerlarını koru.
             for (
                 int address = 0;
                 address < visibleRegisterCount;
@@ -1472,13 +1610,8 @@ namespace Modbus.App.ViewModels
                     GetRegisterName(address),
                     _dataStore.HoldingRegisters[address]);
 
-                // Satır, Float32/Double64 hesaplamak için
-                // komşu registerlara bu fonksiyon üzerinden ulaşır.
                 item.RegisterReader = ReadServerRegister;
-
-                item.PropertyChanged +=
-                    OnServerRegisterRowChanged;
-
+                item.PropertyChanged += OnServerRegisterRowChanged;
                 ServerRegisters.Add(item);
             }
 
@@ -1498,6 +1631,36 @@ namespace Modbus.App.ViewModels
                     "Float örneği (düşük word)";
 
                 ServerRegisters[10].RefreshDerived();
+            }
+
+            // Ardından LiBat BMS / STM32 simülasyon registerlarını dokümandaki
+            // 4xxxx adresleriyle göster. Bunların gerçek DataStore adresleri
+            // ProtocolAddress (88..154) değeridir.
+            foreach (BmsRegister reg in LiBatBmsProfile.Registers)
+            {
+                if (reg.ProtocolAddress < 0 ||
+                    reg.ProtocolAddress >= _dataStore.HoldingRegisters.Length)
+                {
+                    continue;
+                }
+
+                ushort rawValue =
+                    _dataStore.GetHoldingRegister(reg.ProtocolAddress);
+
+                RegisterItem item = new(
+                    reg.LogicalAddress,
+                    reg.Name,
+                    rawValue)
+                {
+                    RegisterType = "Holding Register",
+                    DataType = reg.Type == "int16" ? "Int16" : "UInt16",
+                    DisplayValueOverride = LiBatBmsProfile.FormatValue(reg, rawValue),
+                    Comment = LiBatBmsProfile.BuildComment(reg, rawValue),
+                    RegisterReader = ReadServerRegister
+                };
+
+                item.PropertyChanged += OnServerRegisterRowChanged;
+                ServerRegisters.Add(item);
             }
         }
 
@@ -1611,6 +1774,17 @@ namespace Modbus.App.ViewModels
             if (e.PropertyName ==
                 nameof(RegisterItem.RegisterType))
             {
+                // LiBat register map yalnızca Holding Register alanını kullanır.
+                // Profil satırının türü yanlışlıkla değiştirilirse geri al.
+                if (LiBatBmsProfile.IsLogicalAddress(item.Address) &&
+                    item.RegisterType != "Holding Register")
+                {
+                    item.RegisterType = "Holding Register";
+                    AddLog(
+                        $"[LiBat] {item.Address} Holding Register'dır; register tipi değiştirilemez.");
+                    return;
+                }
+
                 WriteRowToDataStore(item);
 
                 RefreshNeighbours(
@@ -1668,20 +1842,49 @@ namespace Modbus.App.ViewModels
                     return;
                 }
 
-                if (_dataStore.HoldingRegisters[
-                        item.Address] == item.Value)
+                int storageAddress =
+                    GetHoldingStorageAddress(item.Address);
+
+                if (item.Address == 40154 &&
+                    item.Value is < 1 or > 247)
                 {
+                    ushort previousValue =
+                        _dataStore.GetHoldingRegister(storageAddress);
+
+                    AddLog(
+                        $"[LiBat] 40154 Unit ID değeri 1..247 olmalıdır. " +
+                        $"{item.Value} reddedildi; önceki değer {previousValue} korunuyor.");
+
+                    item.Value = previousValue;
+                    ApplyLiBatMetadataToRow(item);
+                    return;
+                }
+
+                if (_dataStore.HoldingRegisters[storageAddress] == item.Value)
+                {
+                    ApplyLiBatMetadataToRow(item);
                     return;
                 }
 
                 _dataStore.SetHoldingRegister(
-                    item.Address,
+                    storageAddress,
                     item.Value);
 
-                AddLog(
-                    $"[UI] Server Holding Register" +
-                    $"[{item.Address}] = {item.Value} " +
-                    $"olarak değiştirildi.");
+                ApplyLiBatMetadataToRow(item);
+
+                if (item.Address >= 40000)
+                {
+                    AddLog(
+                        $"[UI][LiBat] PLC {item.Address} / Register {storageAddress} = " +
+                        $"{item.Value} olarak değiştirildi.");
+                }
+                else
+                {
+                    AddLog(
+                        $"[UI] Server Holding Register" +
+                        $"[{item.Address}] = {item.Value} " +
+                        $"olarak değiştirildi.");
+                }
             }
             catch (Exception ex)
             {
@@ -1717,10 +1920,19 @@ namespace Modbus.App.ViewModels
             ushort value)
         {
             RunOnUiThread(
-                () => ApplyToServerRow(
-                    address,
-                    value,
-                    "Holding Register"));
+                () =>
+                {
+                    ApplyToServerRow(
+                        address,
+                        value,
+                        "Holding Register");
+
+                    // LiBat 40154 / Register 154 Unit ID registerıdır.
+                    if (address == 154 && value is >= 1 and <= 247)
+                    {
+                        ServerUnitId = value.ToString();
+                    }
+                });
         }
 
         private void OnInputRegisterChanged(
@@ -1741,11 +1953,16 @@ namespace Modbus.App.ViewModels
         {
             foreach (RegisterItem row in ServerRegisters)
             {
-                if (row.Address == address &&
+                int rowStorageAddress =
+                    registerType == "Holding Register"
+                        ? GetHoldingStorageAddress(row.Address)
+                        : row.Address;
+
+                if (rowStorageAddress == address &&
                     row.RegisterType == registerType)
                 {
                     row.Value = value;
-                    return;
+                    ApplyLiBatMetadataToRow(row);
                 }
             }
         }
@@ -1784,28 +2001,30 @@ namespace Modbus.App.ViewModels
         // ================================================================
 
         private void UpdateClientRegisterRows(
-            ushort startAddress,
+            ushort protocolStartAddress,
+            int displayStartAddress,
             ushort[] values,
-            string registerType)
+            string registerType,
+            bool useLiBatProfile)
         {
             ClientRegisters.Clear();
 
-            for (
-                int i = 0;
-                i < values.Length;
-                i++)
+            for (int i = 0; i < values.Length; i++)
             {
-                int address =
-                    startAddress + i;
+                int displayAddress =
+                    displayStartAddress + i;
 
                 RegisterItem row = new(
-                    address,
-                    GetRegisterName(address),
+                    displayAddress,
+                    GetRegisterName(displayAddress),
                     values[i])
                 {
                     RegisterType = registerType,
                     RegisterReader = ReadClientRegister
                 };
+
+                if (useLiBatProfile)
+                    ApplyLiBatMetadataToRow(row);
 
                 ClientRegisters.Add(row);
             }
@@ -1816,45 +2035,57 @@ namespace Modbus.App.ViewModels
         }
 
         private void UpdateSingleClientRegister(
-            ushort address,
-            ushort value)
+            ushort protocolAddress,
+            int displayAddress,
+            ushort value,
+            bool useLiBatProfile)
         {
             RegisterItem? existing =
                 ClientRegisters.FirstOrDefault(
-                    x => x.Address == address);
+                    x => x.Address == displayAddress);
 
             if (existing != null)
             {
                 existing.Value = value;
 
+                if (useLiBatProfile)
+                    ApplyLiBatMetadataToRow(existing);
+
                 RefreshNeighbours(
                     ClientRegisters,
-                    address);
+                    displayAddress);
 
                 return;
             }
 
             RegisterItem row = new(
-                address,
-                GetRegisterName(address),
+                displayAddress,
+                GetRegisterName(displayAddress),
                 value)
             {
                 RegisterReader = ReadClientRegister
             };
+
+            if (useLiBatProfile)
+                ApplyLiBatMetadataToRow(row);
 
             ClientRegisters.Add(row);
             row.RefreshDerived();
         }
 
         private void UpdateMultipleClientRegisters(
-            ushort startAddress,
-            ushort[] values)
+            ushort protocolStartAddress,
+            int displayStartAddress,
+            ushort[] values,
+            bool useLiBatProfile)
         {
             for (int i = 0; i < values.Length; i++)
             {
                 UpdateSingleClientRegister(
-                    (ushort)(startAddress + i),
-                    values[i]);
+                    (ushort)(protocolStartAddress + i),
+                    displayStartAddress + i,
+                    values[i],
+                    useLiBatProfile);
             }
 
             foreach (RegisterItem row in ClientRegisters)
@@ -2811,6 +3042,115 @@ namespace Modbus.App.ViewModels
         // ================================================================
         // YARDIMCI METOTLAR
         // ================================================================
+
+        /// <summary>
+        /// Server tablosunda LiBat 4xxxx adresi kullanılıyorsa gerçek DataStore
+        /// indeksini döndürür. Örn. 40111 -> 111. Generic satırlar aynen kalır.
+        /// </summary>
+        private static int GetHoldingStorageAddress(int displayAddress)
+        {
+            return LiBatBmsProfile.TryLogicalToProtocolAddress(
+                    displayAddress,
+                    out ushort protocolAddress)
+                ? protocolAddress
+                : displayAddress;
+        }
+
+        /// <summary>
+        /// Bir RegisterItem LiBat haritasındaki bir adrese aitse isim, tip,
+        /// ölçeklenmiş değer ve açıklama bilgilerini uygular.
+        /// </summary>
+        private static void ApplyLiBatMetadataToRow(RegisterItem row)
+        {
+            if (!LiBatBmsProfile.TryGetByLogicalAddress(
+                    row.Address,
+                    out BmsRegister reg))
+            {
+                return;
+            }
+
+            row.Alias = reg.Name;
+            row.DataType =
+                reg.Type == "int16"
+                    ? "Int16"
+                    : "UInt16";
+            row.DisplayValueOverride =
+                LiBatBmsProfile.FormatValue(reg, row.Value);
+            row.Comment =
+                LiBatBmsProfile.BuildComment(reg, row.Value);
+        }
+
+        /// <summary>
+        /// LiBat FC03 okumasını ham sayı listesi yerine insanın anlayacağı
+        /// register isimleri ve ölçeklenmiş değerlerle özetler.
+        /// </summary>
+        private static string BuildLiBatReadSummary(
+            int logicalStartAddress,
+            ushort[] values)
+        {
+            if (values.Length == 0)
+                return "LiBat cevabı boş.";
+
+            var parts = new System.Collections.Generic.List<string>();
+            int maxShown = Math.Min(values.Length, 6);
+
+            for (int i = 0; i < maxShown; i++)
+            {
+                int logicalAddress = logicalStartAddress + i;
+                ushort raw = values[i];
+
+                if (LiBatBmsProfile.TryGetByLogicalAddress(
+                        logicalAddress,
+                        out BmsRegister reg))
+                {
+                    parts.Add(
+                        $"{logicalAddress} {reg.Name} = " +
+                        $"{LiBatBmsProfile.FormatValue(reg, raw)} (raw {raw})");
+                }
+                else
+                {
+                    parts.Add($"{logicalAddress} = {raw}");
+                }
+            }
+
+            if (values.Length > maxShown)
+                parts.Add($"... +{values.Length - maxShown} register");
+
+            return "LiBat: " + string.Join(" | ", parts);
+        }
+
+        /// <summary>
+        /// Paket Alanları / Response tablosuna LiBat register anlamlarını ekler.
+        /// </summary>
+        private void AddLiBatResponseDetails(
+            int logicalStartAddress,
+            ushort[] values)
+        {
+            for (int i = 0; i < values.Length; i++)
+            {
+                int logicalAddress = logicalStartAddress + i;
+                ushort raw = values[i];
+
+                if (LiBatBmsProfile.TryGetByLogicalAddress(
+                        logicalAddress,
+                        out BmsRegister reg))
+                {
+                    AddPacketField(
+                        ResponseDetails,
+                        $"LiBat {logicalAddress} — {reg.Name}",
+                        LiBatBmsProfile.FormatValue(reg, raw),
+                        $"Register {reg.ProtocolAddress}; raw {raw} / 0x{raw:X4}; {reg.Description}");
+                }
+                else
+                {
+                    AddPacketField(
+                        ResponseDetails,
+                        $"LiBat {logicalAddress}",
+                        raw.ToString(),
+                        "Dokümanda Reserved veya ayrı tanımı olmayan register.");
+                }
+            }
+        }
 
         private static void AddPacketField(
             ObservableCollection<PacketFieldItem> collection,

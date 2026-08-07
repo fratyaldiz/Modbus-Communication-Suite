@@ -316,6 +316,11 @@ namespace Modbus.Communication.Server
             if (!_dataStore.IsValidRegisterRange(address, 1))
                 return BuildException(function, 0x02);
 
+            // LiBat 40154 / protocol register 154 Modbus slave adresidir.
+            // Yalnızca 1..247 kabul edilir.
+            if (address == 154 && value is < 1 or > 247)
+                return BuildException(function, 0x03);
+
             _dataStore.SetHoldingRegister(address, value);
             Log($"[Server] FC06: Register[{address}] = {value} yazıldı.");
             return pdu;
@@ -362,6 +367,17 @@ namespace Modbus.Communication.Server
 
             if (!_dataStore.IsValidRegisterRange(startAddress, quantity))
                 return BuildException(function, 0x02);
+
+            // Register 154 bu FC16 aralığındaysa geçersiz Unit ID değerini
+            // herhangi bir register yazılmadan önce reddet.
+            for (int i = 0; i < quantity; i++)
+            {
+                int targetAddress = startAddress + i;
+                ushort candidateValue = ReadUInt16(pdu, 6 + (i * 2));
+
+                if (targetAddress == 154 && candidateValue is < 1 or > 247)
+                    return BuildException(function, 0x03);
+            }
 
             for (int i = 0; i < quantity; i++)
             {

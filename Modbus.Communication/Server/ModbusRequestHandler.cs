@@ -148,6 +148,11 @@ namespace Modbus.Communication.Server
 
             if (!_dataStore.IsValidRegisterRange(address, 1)) return BuildException(function, 0x02);
 
+            // LiBat 40154 / protocol register 154 Modbus slave adresidir.
+            // Dokümana göre yalnızca 1..247 kabul edilir; 0 broadcast olduğu için set edilemez.
+            if (address == 154 && value is < 1 or > 247)
+                return BuildException(function, 0x03);
+
             _dataStore.SetHoldingRegister(address, value);
             _log?.Invoke($"[RTU Slave] FC06: Register[{address}] = {value} yazıldı.");
             return pdu; // yazma cevabı isteğin aynısıdır (echo)
@@ -181,6 +186,17 @@ namespace Modbus.Communication.Server
             if (byteCount != quantity * 2) return BuildException(function, 0x03);
             if (pdu.Length != 6 + byteCount) return BuildException(function, 0x03);
             if (!_dataStore.IsValidRegisterRange(startAddress, quantity)) return BuildException(function, 0x02);
+
+            // FC16 aralığı LiBat Unit ID registerı 154'ü içeriyorsa, geçersiz
+            // değer yüzünden kısmi yazma oluşmadan önce isteği reddet.
+            for (int i = 0; i < quantity; i++)
+            {
+                int targetAddress = startAddress + i;
+                ushort candidateValue = ReadUInt16(pdu, 6 + (i * 2));
+
+                if (targetAddress == 154 && candidateValue is < 1 or > 247)
+                    return BuildException(function, 0x03);
+            }
 
             for (int i = 0; i < quantity; i++)
             {

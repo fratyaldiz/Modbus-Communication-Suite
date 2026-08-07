@@ -25,7 +25,8 @@ namespace Modbus.Communication.Server
     public sealed class ModbusRtuServer
     {
         private readonly RtuConnectionSettings _settings;
-        private readonly byte _unitId;
+        private readonly ModbusDataStore _dataStore;
+        private byte _unitId;
         private readonly ModbusRequestHandler _handler;
         private readonly PacketBuilder _builder = new();
 
@@ -39,6 +40,7 @@ namespace Modbus.Communication.Server
         public ModbusRtuServer(ModbusDataStore dataStore, RtuConnectionSettings settings, byte unitId = 1)
         {
             if (dataStore == null) throw new ArgumentNullException(nameof(dataStore));
+            _dataStore = dataStore;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _unitId = unitId;
             _handler = new ModbusRequestHandler(dataStore, Log);
@@ -66,6 +68,9 @@ namespace Modbus.Communication.Server
             _port.DiscardInBuffer();
             _port.DiscardOutBuffer();
 
+            _dataStore.HoldingRegisterChanged -= OnHoldingRegisterChanged;
+            _dataStore.HoldingRegisterChanged += OnHoldingRegisterChanged;
+
             _cts = new CancellationTokenSource();
             IsRunning = true;
             Log($"RTU Slave başladı. {_settings.PortName} @ {_settings.BaudRate}, Unit {_unitId} dinleniyor.");
@@ -78,6 +83,7 @@ namespace Modbus.Communication.Server
             if (!IsRunning) return;
 
             IsRunning = false;
+            _dataStore.HoldingRegisterChanged -= OnHoldingRegisterChanged;
             _cts?.Cancel();
 
             try
@@ -178,6 +184,33 @@ namespace Modbus.Communication.Server
             }
 
             return buffer.ToArray();
+        }
+
+
+        /// <summary>
+        /// LiBat register 40154 / protocol register 154 FC06 ile değiştirildiğinde
+        /// gerçek BMS davranışını taklit ederek RTU slave adresini anında günceller.
+        /// Yazma isteğinin cevabı eski request Unit ID ile gönderilir; sonraki istekler
+        /// yeni Unit ID kullanmalıdır.
+        /// </summary>
+        private void OnHoldingRegisterChanged(int address, ushort value)
+        {
+            if (address != 154)
+                return;
+
+            if (value is < 1 or > 247)
+            {
+                Log($"[LiBat] 40154 için geçersiz Unit ID değeri: {value}. 1..247 olmalı.");
+                return;
+            }
+
+            byte newUnitId = (byte)value;
+            if (_unitId == newUnitId)
+                return;
+
+            byte oldUnitId = _unitId;
+            _unitId = newUnitId;
+            Log($"[LiBat] Modbus Unit ID değişti: {oldUnitId} -> {_unitId} (40154 / Register 154).");
         }
 
         private static bool CheckCrc(byte[] frame)

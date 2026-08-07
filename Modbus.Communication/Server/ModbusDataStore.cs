@@ -19,7 +19,7 @@ namespace Modbus.Communication.Server
         public event Action<int, bool>? CoilChanged;
         public event Action<int, bool>? DiscreteInputChanged;
 
-        public ModbusDataStore(int registerCount = 100, int bitCount = 100)
+        public ModbusDataStore(int registerCount = 256, int bitCount = 100)
         {
             if (registerCount <= 0)
                 throw new ArgumentOutOfRangeException(nameof(registerCount));
@@ -71,6 +71,11 @@ namespace Modbus.Communication.Server
                 DiscreteInputs[2] = true;
                 DiscreteInputs[3] = false;
             }
+
+            // LiBat BMS / STM32 simülasyonu için resmi register map örneklerini
+            // aynı Holding Register hafızasına yükle. LiBat registerları 88..154
+            // aralığında olduğu için varsayılan registerCount artık 256'dır.
+            LiBatBmsProfile.Apply(this);
         }
 
         public ushort GetHoldingRegister(int address)
