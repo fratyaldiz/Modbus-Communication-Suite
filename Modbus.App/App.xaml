@@ -1,14 +1,11 @@
 <Application x:Class="Modbus.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Modbus.App"
-             StartupUri="MainWindow.xaml">
+             xmlns:local="clr-namespace:Modbus.App">
     <!--
-       DÜZELTME: Eskiden x:Class="Modbus.App" ve xmlns:local="clr-namespace:Modbus" idi.
-       Sorun: "Modbus.App" hem uygulama SINIFININ adı hem de bir NAMESPACE (Modbus.App.MainWindow)
-       olarak kullanılıyordu. Aynı isim ikisi birden olamaz; proje derlenmiyordu.
-       Çözüm: uygulama sınıfını "Modbus.App.App" yaptık, namespace'i de "Modbus.App".
-       StartupUri: uygulama açılınca gösterilecek ilk pencere.
+        Açılış artık sabit bir pencere değil. App.OnStartup önce Role Selection
+        ekranını gösterir; kullanıcının seçimine göre Master veya Slave çalışma
+        penceresini açar. (StartupUri bu yüzden kaldırıldı.)
     -->
     <Application.Resources>
     </Application.Resources>

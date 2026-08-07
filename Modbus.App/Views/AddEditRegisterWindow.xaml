@@ -1,0 +1,103 @@
+<Window x:Class="Modbus.App.Views.AddEditRegisterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title}"
+        Width="440" Height="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#F4F6F8">
+
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#37474F"/>
+            <Setter Property="Margin" Value="0,8,0,2"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="5,3"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Height" Value="28"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="{Binding Title}" FontSize="18" FontWeight="Bold" Margin="0,0,0,6"/>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="Register Type"/>
+                <ComboBox SelectedIndex="{Binding RegisterTypeIndex}">
+                    <ComboBoxItem>Holding Register</ComboBoxItem>
+                    <ComboBoxItem>Input Register</ComboBoxItem>
+                </ComboBox>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="PLC / Logical Address"/>
+                        <TextBox Text="{Binding PlcAddress, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="PDU / Register Address"/>
+                        <TextBox Text="{Binding PduAddress, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Name / Alias"/>
+                <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                <TextBlock Text="Data Type"/>
+                <ComboBox ItemsSource="{Binding DataTypeOptions}" SelectedItem="{Binding DataType}"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Raw Value"/>
+                        <TextBox Text="{Binding RawValue, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Scale"/>
+                        <TextBox Text="{Binding Scale, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Unit"/>
+                <TextBox Text="{Binding Unit, UpdateSourceTrigger=PropertyChanged}"/>
+
+                <TextBlock Text="Description"/>
+                <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
+                         Height="52" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalContentAlignment="Top"/>
+
+                <CheckBox Content="Writable (Master FC06/FC16 ile yazılabilir)"
+                          IsChecked="{Binding Writable}" Margin="0,12,0,0"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="CANCEL" Width="100" Height="34" Margin="0,0,10,0"
+                    Background="#B0BEC5" Foreground="#263238" BorderThickness="0"
+                    Click="OnCancel"/>
+            <Button Content="SAVE" Width="120" Height="34"
+                    Background="#00897B" Foreground="White" BorderThickness="0"
+                    Click="OnSave"/>
+        </StackPanel>
+    </Grid>
+</Window>

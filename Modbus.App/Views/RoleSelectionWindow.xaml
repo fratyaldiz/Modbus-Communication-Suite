@@ -1,0 +1,80 @@
+<Window x:Class="Modbus.App.Views.RoleSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Modbus Communication Suite"
+        Width="560" Height="540"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#1E1F22">
+
+    <Window.Resources>
+        <Style x:Key="RoleButton" TargetType="Button">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Background" Value="#2B2D31"/>
+            <Setter Property="BorderBrush" Value="#3A3D42"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="8"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter Margin="18,0" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#33363B"/>
+                                <Setter TargetName="b" Property="BorderBrush" Value="#00A884"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="MODBUS COMMUNICATION SUITE"
+                   Foreground="White" FontSize="22" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" Text="Çalışma modunu seçin" Margin="0,4,0,20"
+                   Foreground="#9AA0A6" FontSize="13"/>
+
+        <StackPanel Grid.Row="2">
+            <Button Style="{StaticResource RoleButton}" Click="OnMasterClick">
+                <StackPanel>
+                    <TextBlock Text="MASTER / CLIENT" Foreground="#4DD0E1" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="Başka bir Modbus Slave/Server cihazına bağlanır."
+                               Foreground="#C7CBD1" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    <TextBlock Text="Register okur ve yazar."
+                               Foreground="#9AA0A6" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Button>
+
+            <Button Style="{StaticResource RoleButton}" Click="OnSlaveClick">
+                <StackPanel>
+                    <TextBlock Text="SLAVE / SERVER" Foreground="#81C784" FontSize="17" FontWeight="Bold"/>
+                    <TextBlock Text="Bir Modbus cihazını simüle eder."
+                               Foreground="#C7CBD1" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    <TextBlock Text="Master isteklerine cevap verir."
+                               Foreground="#9AA0A6" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <Button Grid.Row="3" Content="EXIT" Height="38" Width="120"
+                HorizontalAlignment="Right" Cursor="Hand"
+                Background="#3A3D42" Foreground="White" BorderThickness="0"
+                Click="OnExitClick"/>
+    </Grid>
+</Window>

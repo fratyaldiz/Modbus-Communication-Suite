@@ -1,38 +1,76 @@
 # Modbus Communication Suite
 
-Tek ekran üzerinden hem **Master (Client)** hem **Slave (Server)** rolünü çalıştırabilen
-Modbus emülatörü. Modbus TCP ve Modbus RTU (seri port / RS485) desteklenir. Uygulama
-WPF (.NET 9) ile MVVM mimarisinde yazılmıştır.
+Modbus **Master (Client)** ve **Slave (Server)** emülatörü. Uygulama açılışta bir
+**rol seçim ekranı** gösterir; kullanıcı MASTER veya SLAVE seçer ve yalnızca o role ait
+çalışma penceresi açılır. Modbus TCP ve Modbus RTU (seri port / RS485) desteklenir.
+WPF (.NET 9) + MVVM ile yazılmıştır.
 
-Amaç; gerçek bir PLC/kart olmadan Modbus haberleşmesini test etmek, gelen-giden
-paketleri byte seviyesinde incelemek ve register değerlerini farklı veri tiplerinde
-(IEEE 754 float dahil) yorumlamaktır.
+Amaç; gerçek bir PLC/BMS/kart olmadan Modbus haberleşmesini test etmek, bir cihazı
+(örn. LiBat BMS / STM32) simüle etmek, gelen-giden paketleri byte seviyesinde incelemek
+ve register değerlerini farklı veri tiplerinde (IEEE 754 float dahil) yorumlamaktır.
+
+## Genel akış
+
+```
+Açılış → Role Selection
+          ├── MASTER / CLIENT  → MasterWindow
+          └── SLAVE  / SERVER  → SlaveWindow
+```
+
+TCP testinde uygulama iki ayrı örnek (instance) olarak açılır: biri Slave, biri Master.
+RTU testinde tek örnek, seçilen role göre RTU Master ya da RTU Slave olarak çalışır
+(aynı COM portu ikisi tarafından aynı anda açılamaz).
 
 ## Özellikler
 
-- **Master / Client**: TCP veya RTU üzerinden istek gönderir, cevabı çözer ve tabloda gösterir.
-- **Slave / Server**: Sanal cihaz olarak dinler ve gelen istekleri karşılar (TCP ve RTU).
-- **Desteklenen fonksiyon kodları**: FC01, FC02, FC03, FC04, FC05, FC06, FC16.
-- **Ayrı hafıza alanları**: Holding Register, Input Register, Coil, Discrete Input.
-- **IEEE 754 çözümleme**: 16/32/64-bit tam sayı, Float32, Double64 ve ASCII dönüşümü;
-  ABCD / CDAB / BADC / DCBA byte sıralaması seçimi; float için işaret/üs/mantissa
-  bit ayrıştırması.
-- **Paket analizi**: Gönderilen ve alınan çerçeve byte-byte (HEX / DEC / BINARY / anlam) gösterilir.
-- **Seri port ayarları**: COM port listeleme, baud rate, data bits, parity, stop bits, timeout.
-- **Responsive arayüz**: Her çözünürlük ve Windows ölçeklendirmesinde (100/125/150%) içerik
-  tam görünür; alan yetmezse kaydırma çubuğu devreye girer.
+**Genel**
+- Rol bazlı ayrı Master / Slave pencereleri (tek ekranda karışık kontrol yok).
+- TCP + RTU; FC01, FC02, FC03, FC04, FC05, FC06, FC16.
+- CRC doğrulama, timeout yönetimi, Modbus exception çözümleme.
+- Byte-byte Communication Traffic (HEX / DEC / BINARY / anlam) ve profesyonel zaman damgalı log.
+- Ayarlar `%LocalAppData%/ModbusCommunicationSuite/settings.json` içinde saklanır (System.Text.Json).
+
+**Master / Client**
+- Bağlantı (TCP: IP/Port, RTU: COM/Baud/Data/Parity/Stop/Timeout), profesyonel durum metinleri
+  (Disconnected, Connecting, Connected, COM Port Open — Device Not Verified, Waiting Response,
+  Device Responded, Timeout, CRC Error, Modbus Exception, Connection Error).
+- Modbus Request (Unit / Function / Address / Quantity / Write Value / FC16 Values) + **sürekli Polling**.
+- Client Register Watch, Client Bit Watch, Data Inspector (Unsigned/Signed/Hex/Binary/UInt32/Int32/Float32/Double64).
+- Status / Active Events ve Tx / Rx / Err / Timeout sayaçları.
+- Adres alanına doğrudan `40111` yazılır (PLC adresi → PDU otomatik).
+
+**Slave / Server**
+- **Dinamik Register Memory**: `+ Add Register`, `Edit`, `Delete`, `Load Profile`, `Clear Custom`.
+- **Device Profile** sistemi: `LiBat BMS / STM32` (hazır register haritası) ve `Empty / Custom Device` (boş başlar).
+- **Tek doğruluk kaynağı**: UI'daki değer ile Modbus server hafızası iki yönlü senkron.
+  Slave'de değeri değiştirince Master anında okur; Master FC06/FC16 ile yazınca Slave UI anında güncellenir.
+- **Status / Active Events**: profilden gelen bit tanımları (LiBat 64-bit Battery Status → Bit / State / Severity / Description, "Show Active Only").
+- TCP (Listen Port) ve RTU (COM/Baud/.../Unit ID) server.
+
+**LiBat BMS desteği**
+- Register haritası 40088..40154 (kaynak: https://wiki.li-bat.com/comm/modbus/register-map/).
+- Adresleme: PDU = PLC − 40000 (40111 → 111). Ölçek/birim dönüşümü (271 → 27.1 °C), `0xFFFF` = "mevcut değil".
+- 40154 (Unit ID) RTU slave çalışırken FC06 ile değiştirilince cihaz adresi anında güncellenir.
 
 ## Mimari
 
-Katmanlı yapı, her katman tek sorumluluk taşır:
-
-| Proje | Sorumluluk |
-|-------|-----------|
+| Katman | Sorumluluk |
+|--------|-----------|
 | `Modbus.Core` | Ortak arayüzler (`IModbusClient`) |
-| `Modbus.Protocol` | Paket oluşturma/çözme, CRC-16, fonksiyon kodları, veri dönüşümü (IEEE 754) |
-| `Modbus.Communication` | TCP/RTU client ve server, sanal cihaz veri deposu |
-| `Modbus.App` | WPF arayüzü, MVVM (ViewModel, komutlar, modeller) |
+| `Modbus.Protocol` | Paket oluşturma/çözme, CRC-16, fonksiyon kodları, veri dönüşümü (`DataConverter`, IEEE 754) |
+| `Modbus.Communication` | TCP/RTU client + server, `ModbusDataStore`, `ModbusRequestHandler` |
+| `Modbus.App` | WPF/MVVM: Views, ViewModels, Models, Profiles, Services |
 | `Modbus.Devices` | Cihaz tanımları için ayrılmış |
+
+`Modbus.App` iç yapısı:
+
+```
+Views/       RoleSelectionWindow, MasterWindow, SlaveWindow, AddEditRegisterWindow
+ViewModels/  MasterViewModel, SlaveViewModel, AddEditRegisterViewModel, ViewModelBase
+Models/      DeviceRegisterDefinition, StatusBitDefinition, ActiveEventItem, BitItem, FrameByteItem, ...
+Profiles/    IDeviceProfile, LiBatDeviceProfile, EmptyDeviceProfile
+Services/    RegisterMemoryService (tek doğruluk kaynağı), AddressTranslationService, SettingsService, FrameAnalyzer
+```
 
 ## Gereksinimler
 
@@ -42,32 +80,30 @@ Katmanlı yapı, her katman tek sorumluluk taşır:
 
 ## Derleme ve Çalıştırma
 
-Komut satırı:
-
 ```bash
 dotnet run --project Modbus.App/Modbus.App.csproj
 ```
 
-Visual Studio: `ModbusCommunicationSuite.slnx` açılır, `Modbus.App` başlangıç projesi
-seçilir ve F5 ile çalıştırılır.
+Visual Studio: `ModbusCommunicationSuite.slnx` açılır, `Modbus.App` başlangıç projesi seçilir, F5.
 
 ## Kullanım
 
-### TCP (donanımsız test)
+### TCP (iki örnek ile)
 
-1. Uygulamayı iki kez açın.
-2. Birinci pencere — Server / Slave: Protocol `TCP`, START.
-3. İkinci pencere — Client / Master: Protocol `TCP`, IP `127.0.0.1`, Port `1502`, bağlanın.
-4. Function `03 Read Holding Registers`, Address `0`, Quantity `3`, SEND REQUEST.
-5. Register 10–11 hazır IEEE 754 float örneği içerir (123.456); Float sekmesinden okunabilir.
+1. Uygulamayı çalıştır → **SLAVE / SERVER** seç → Device Profile `LiBat BMS / STM32` → Load Profile → Protocol `TCP` → Listen Port `1502` → **Start Server**.
+2. Uygulamayı ikinci kez çalıştır → **MASTER / CLIENT** → Protocol `TCP` → IP `127.0.0.1` → Port `1502` → **Connect**.
+3. Master: Function `03 Read Holding Registers`, Address `40111`, Quantity `1` → **Send Request** → `271` (= 27.1 °C).
+
+### Özel register (Custom Device)
+
+1. Slave → Device Profile `Empty / Custom Device` → Load Profile.
+2. `+ Add Register`: PLC `40160`, Holding, Name `Test Temperature`, Raw `250`, Scale `0.1`, Unit `°C` → Save.
+3. Master → FC03 Address `40160` Quantity `1` → `250` (tanım Slave tarafında `25.0 °C`).
 
 ### RTU (gerçek kart)
 
-- **Kart = slave cihaz ise** uygulama master olur: Client tarafında Protocol `RTU`, COM
-  portunu seçin, kartın dokümanındaki baud/parity/data/stop/Unit ID değerlerini girin.
-- **Kart = master ise** uygulama slave olur: Server tarafında Protocol `RTU`, COM/baud/Unit
-  ID ayarlayın, START.
-- Aynı COM portu Client ve Server tarafında aynı anda kullanılamaz.
+- Kart = slave cihaz ise: **Master** rolü, Protocol `RTU`, kartın COM/baud/parity/Unit ID değerleri → Connect → Send/Poll.
+- Kart = master ise: **Slave** rolü, Protocol `RTU`, COM/baud/Unit ID → Start Server.
 
 ## Desteklenen Modbus Fonksiyonları
 
@@ -80,27 +116,3 @@ seçilir ve F5 ile çalıştırılır.
 | FC05 | Write Single Coil |
 | FC06 | Write Single Register |
 | FC16 | Write Multiple Registers |
-
-## Proje Yapısı
-
-```
-ModbusCommunicationSuite.slnx
-├─ Modbus.Core
-│  └─ Interfaces/IModbusClient.cs
-├─ Modbus.Protocol
-│  ├─ Builders/PacketBuilder.cs
-│  ├─ Parsers/ResponseParser.cs
-│  ├─ Helpers/CRC16.cs, DataConverter.cs
-│  ├─ Functions/ModbusFunctionCode.cs
-│  └─ Packets/ModbusPacket.cs
-├─ Modbus.Communication
-│  ├─ TCP/ModbusTcpClient.cs
-│  ├─ RTU/ModbusRtuClient.cs, RtuConnectionSettings.cs
-│  └─ Server/ModbusTcpServer.cs, ModbusRtuServer.cs, ModbusRequestHandler.cs, ModbusDataStore.cs
-├─ Modbus.App
-│  ├─ Views / MainWindow.xaml
-│  ├─ ViewModels/MainViewModel.cs
-│  ├─ Models/ (RegisterItem, BitItem, FrameByteItem, ...)
-│  └─ Commands/RelayCommand.cs
-└─ Modbus.Devices
-```

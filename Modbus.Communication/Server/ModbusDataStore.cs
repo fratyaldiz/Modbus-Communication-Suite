@@ -27,55 +27,16 @@ namespace Modbus.Communication.Server
             if (bitCount <= 0)
                 throw new ArgumentOutOfRangeException(nameof(bitCount));
 
+            // Tüm hafıza alanları BOŞ/sıfır olarak oluşturulur. Eski eğitim/test
+            // değerleri (1234, 5678, 42, Float 123.456 vb.) YÜKLENMEZ.
+            //
+            // İçeriği ne dolduracak? App katmanındaki RegisterMemoryService, seçilen
+            // cihaz profiline (LiBat BMS / Empty) göre. Böylece "Empty / Custom Device"
+            // seçilince hafıza gerçekten boş kalır ve backend belirli bir cihaza bağlı olmaz.
             HoldingRegisters = new ushort[registerCount];
-
-            // Input Register (3x) AYRI bir adres alanıdır. Holding Register 0 ile
-            // Input Register 0 farklı hücrelerdir.
             InputRegisters = new ushort[registerCount];
-
-            // Coil (0x) okunabilir/yazılabilir bit alanıdır.
             Coils = new bool[bitCount];
-
-            // Discrete Input (1x) normalde sadece okunur bit alanıdır.
-            // Emülatörde sensör durumunu taklit etmek için UI tarafından değiştirilebilir.
             DiscreteInputs = new bool[bitCount];
-
-            // Uygulamanın ilk çalışmasında görülecek örnek test değerleri.
-            if (registerCount >= 3)
-            {
-                HoldingRegisters[0] = 1234;
-                HoldingRegisters[1] = 5678;
-                HoldingRegisters[2] = 42;
-
-                InputRegisters[0] = 25;
-                InputRegisters[1] = 50;
-                InputRegisters[2] = 75;
-            }
-
-            // Float32 örneği: 0x42F6 0xE979 = IEEE 754 ile 123.456
-            if (registerCount >= 12)
-            {
-                HoldingRegisters[10] = 0x42F6;
-                HoldingRegisters[11] = 0xE979;
-            }
-
-            if (bitCount >= 4)
-            {
-                Coils[0] = true;
-                Coils[1] = false;
-                Coils[2] = true;
-                Coils[3] = false;
-
-                DiscreteInputs[0] = false;
-                DiscreteInputs[1] = true;
-                DiscreteInputs[2] = true;
-                DiscreteInputs[3] = false;
-            }
-
-            // LiBat BMS / STM32 simülasyonu için resmi register map örneklerini
-            // aynı Holding Register hafızasına yükle. LiBat registerları 88..154
-            // aralığında olduğu için varsayılan registerCount artık 256'dır.
-            LiBatBmsProfile.Apply(this);
         }
 
         public ushort GetHoldingRegister(int address)
